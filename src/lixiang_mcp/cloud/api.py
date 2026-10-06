@@ -11,8 +11,8 @@ import re
 import time
 from typing import Any
 
-from ..models import ClimateCommand, ServiceError
-from ..protocol import climate_payload
+from ..models import ClimateCommand, CommandRejected
+from ..protocol import climate_payload, result_code
 from .auth import AuthSession
 from .config import Profile
 from .crypto import Signer
@@ -124,7 +124,7 @@ class VehicleAPI:
 
     async def submit_climate(self, vin: str, command: ClimateCommand) -> str:
         if not self.allow_control:
-            raise ServiceError("real_control_disabled")
+            raise CommandRejected("real_control_disabled")
         # Acquire both tokens before the one permitted command POST.
         mesh, vat = await self.auth.bundle(
             [
@@ -156,10 +156,12 @@ class VehicleAPI:
         receipt = response.get("requestId") or (
             nested.get("requestId") if isinstance(nested, dict) else None
         )
-        if code is not None and (type(code) not in (int, str) or code not in (0, "0")):
-            if receipt or type(code) not in (int, str):
+        if code is not None:
+            parsed_code = result_code(code)
+            if parsed_code is None or (parsed_code != 0 and receipt):
                 raise ProtocolError("command_response_conflict")
-            raise ServiceError("cloud_rejected")
+            if parsed_code != 0:
+                raise CommandRejected("cloud_rejected")
         if not isinstance(receipt, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", receipt):
             raise ProtocolError("command_receipt_unknown")
         return receipt

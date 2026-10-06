@@ -352,7 +352,14 @@ async def test_mixed_generation_mesh_vat_bundle_reacquires_old_token(config, clo
 
 
 @pytest.mark.parametrize(
-    "result", [{"pushState": 7, "resultCode": 0}, {"pushState": 5, "resultCode": 2009}]
+    "result",
+    [
+        {"pushState": 7, "resultCode": 0},
+        {"pushState": 5, "resultCode": 2009},
+        {"pushState": 7, "resultCode": ""},
+        {"pushState": 7, "resultCode": "   "},
+        {"pushState": 7, "resultCode": "not-a-code"},
+    ],
 )
 async def test_conflicting_results_become_unknown_and_block_writes(config, cloud, tmp_path, result):
     cloud.result = result

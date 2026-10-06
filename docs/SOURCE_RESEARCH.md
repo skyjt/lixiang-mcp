@@ -65,7 +65,7 @@ VSS（906–973）请求 body 含 VIN 与 paths，返回 items/path/dp/value/tsF
 - `li_api.py` 1132–1189：POST cmd/send；Authorization=MESH，body.token=VAT，body 含 VIN/cmdKey/cmdData/domain=xcu/jobExpire=900/expire=900/expireAt=now+900000。原代码申请12个VAT权限；本项目只申请空调 scope 与当前 VIN，其服务端兼容性未验证，不为“兼容”申请解锁等权限。
 - 1201–1306：requestId 可在根或 data；无 receipt 属不确定接受，不能当“安全失败”后重发。预先获取必要 token 后只发送一次；HTTP401/5xx/响应丢失均不重发控车 POST。
 - GET cmd-result/{requestId} 是只读，可受限刷新 token 后再查。requestId 必须验证格式且绑定原账号/车辆。禁止跨车查询或把任意 path 作为 receipt。
-- **冲突证据**：上游对 pushState=5 的未知非零 rc 仍返回“成功”，且 pushState=7 与成功 rc 也当成功。现有实现把 ps=7 全当失败同样过度确定；修正为只有一致的 ps=5/已知成功码标记 cloud_completed，一致明确失败标记 failed，矛盾/缺字段保留 unknown。
+- **冲突证据**：上游对 pushState=5 的未知非零 rc 仍返回“成功”，且 pushState=7 与成功 rc 也当成功。`li_api.py:1150–1153` 还记录空调曾返回 ps=7、rc 为空。把 ps=7 或任意字符串码判失败都过度确定；只有一致的 ps=5/已知成功码标记 cloud_completed，一致的有效数字失败码标记 failed，矛盾/缺字段/空白/非数字码保留 unknown。cmd/send 的拒绝判断使用相同数字码解析。
 - 不调用隐式 wakeup，不采用 HA 乐观状态。必须在云端成功后读取新的车辆状态确认；超时、矛盾或进程中断阻断该车后续写入，不让模型清除未知记录。
 
 ## HA 与许可边界、剩余未知

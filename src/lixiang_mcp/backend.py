@@ -4,7 +4,15 @@ import asyncio
 from datetime import timedelta
 from typing import Any, Literal, Protocol
 
-from .models import Capabilities, ClimateCommand, Location, ServiceError, Vehicle, VehicleState, now
+from .models import (
+    Capabilities,
+    ClimateCommand,
+    CommandRejected,
+    Location,
+    Vehicle,
+    VehicleState,
+    now,
+)
 from .protocol import climate_payload, sample
 
 Fault = Literal["none", "timeout", "reject", "unconfirmed", "stale"]
@@ -20,7 +28,10 @@ class Backend(Protocol):
     async def capabilities(self, vehicle_id: str) -> Capabilities: ...
     async def state(self, vehicle_id: str) -> VehicleState: ...
     async def location(self, vehicle_id: str) -> Location: ...
-    async def submit_climate(self, command: ClimateCommand) -> str: ...
+    async def submit_climate(self, command: ClimateCommand) -> str:
+        """One attempt; only CommandRejected proves no acceptance. Other errors are uncertain."""
+        ...
+
     async def result(self, receipt: str) -> dict[str, Any]: ...
 
 
@@ -119,7 +130,7 @@ class MockBackend:
         climate_payload(command)  # Exercise the narrow protocol encoder without networking.
         self.submit_count += 1
         if self.fault == "reject":
-            raise ServiceError("cloud_rejected")
+            raise CommandRejected("cloud_rejected")
         if self.fault == "timeout":
             # Models an accepted request whose response was lost: no automatic retry.
             self._climate[command.vehicle_id] = (command.enabled, command.temperature_c or 22)

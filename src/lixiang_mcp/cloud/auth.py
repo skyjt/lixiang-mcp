@@ -13,7 +13,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import SplitResult, parse_qs, urlsplit
 
 import httpx
 
@@ -26,6 +26,13 @@ from .transport import ACCOUNT, ID, CloudHTTP, ProtocolError, object_body
 class CachedToken:
     value: str = field(repr=False)
     expires_at: float
+
+
+def split_redirect(location: str) -> SplitResult:
+    try:
+        return urlsplit(location)
+    except ValueError:
+        raise ProtocolError("invalid_auth_redirect") from None
 
 
 def expiration(value: Any, maximum: int) -> float:
@@ -75,8 +82,8 @@ class AuthSession:
         return location
 
     def _redirect(self, location: str) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-        parsed = urlsplit(location)
-        configured = urlsplit(self.profile.redirect_uri)
+        parsed = split_redirect(location)
+        configured = split_redirect(self.profile.redirect_uri)
         if (parsed.scheme, parsed.netloc, parsed.path) != (
             configured.scheme,
             configured.netloc,
@@ -196,7 +203,7 @@ class AuthSession:
         if response.status_code not in (200, 300, 302):
             raise ProtocolError("login_denied_or_challenge_required")
         location = self._location(response)
-        if parse_qs(urlsplit(location).query).get("require"):
+        if parse_qs(split_redirect(location).query).get("require"):
             raise ProtocolError("login_challenge_required")
         query, _ = self._redirect(location)
         if query.get("state") != [state] or len(query.get("code", [])) != 1 or not query["code"][0]:
@@ -264,7 +271,7 @@ class AuthSession:
             raise ProtocolError("scope_exchange_failed")
         location = self._location(response)
         # login_required is the only auto re-login condition, not any malformed/error response.
-        parts = urlsplit(location)
+        parts = split_redirect(location)
         values = {**parse_qs(parts.query), **parse_qs(parts.fragment)}
         if values.get("error") == ["login_required"]:
             raise ProtocolError("session_expired")

@@ -55,10 +55,18 @@ class CloudHTTP:
                     payload.extend(chunk)
                     if len(payload) > 1_048_576:
                         raise ProtocolError("upstream_response_too_large")
+                # aiter_bytes already decoded Content-Encoding. Do not decompress again or
+                # advertise compressed byte lengths when constructing the detached response.
+                decoded_headers = httpx.Headers(response.headers)
+                for header in ("content-encoding", "content-length", "transfer-encoding"):
+                    decoded_headers.pop(header, None)
                 # A new response avoids retaining the original request with secret headers.
                 return httpx.Response(
-                    response.status_code, headers=response.headers, content=bytes(payload)
+                    response.status_code, headers=decoded_headers, content=bytes(payload)
                 )
+        except httpx.InvalidURL:
+            # HTTPX can parse a Location even with follow_redirects=False.
+            raise ProtocolError("invalid_upstream_redirect") from None
         except httpx.HTTPError:
             raise ProtocolError("upstream_network_error") from None
 

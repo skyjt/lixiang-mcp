@@ -119,3 +119,10 @@ class ServiceError(Exception):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+class CommandRejected(ServiceError):
+    """Submission-only evidence: no command was sent, or the cloud explicitly rejected it.
+
+    A lookup/confirmation error after submission must never imply this guarantee.
+    """

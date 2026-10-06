@@ -8,7 +8,15 @@ from typing import Any
 
 import httpx
 
-from ..models import Capabilities, ClimateCommand, Location, ServiceError, Vehicle, VehicleState
+from ..models import (
+    Capabilities,
+    ClimateCommand,
+    CommandRejected,
+    Location,
+    ServiceError,
+    Vehicle,
+    VehicleState,
+)
 from .api import VehicleAPI
 from .auth import AuthSession
 from .config import CloudConfig, VehicleBinding
@@ -147,13 +155,17 @@ class CloudBackend:
         return location_from_vss(vehicle_id, response, self.ttl, simulated=self.simulated)
 
     async def submit_climate(self, command: ClimateCommand) -> str:
-        if not self.config.allow_real_control:
-            raise ServiceError("real_control_disabled")
-        command = ClimateCommand.model_validate(command.model_dump())
-        binding = self._binding(command.vehicle_id)
-        record = await self._record(binding, write=True)
-        if str(record.get("modelId")) != binding.model_id or not binding.climate_supported:
-            raise ServiceError("unsupported_capability")
+        try:
+            if not self.config.allow_real_control:
+                raise ServiceError("real_control_disabled")
+            command = ClimateCommand.model_validate(command.model_dump())
+            binding = self._binding(command.vehicle_id)
+            record = await self._record(binding, write=True)
+            if str(record.get("modelId")) != binding.model_id or not binding.climate_supported:
+                raise ServiceError("unsupported_capability")
+        except ServiceError as exc:
+            # This block is strictly before the one command POST.
+            raise CommandRejected(exc.code) from None
         receipt = await self._apis[binding.account_id].submit_climate(
             binding.vin.get_secret_value(), command
         )

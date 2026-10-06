@@ -7,6 +7,7 @@ from .backend import Backend
 from .models import (
     Capabilities,
     ClimateCommand,
+    CommandRejected,
     Location,
     Operation,
     Phase,
@@ -125,6 +126,7 @@ class VehicleService:
     async def _execute(
         self, principal: Principal, command: ClimateCommand, operation_id: str
     ) -> None:
+        dispatch_started = False
         try:
             async with self._locks.setdefault(command.vehicle_id, asyncio.Lock()):
                 # Recheck queued work after previous command, including membership and unknowns.
@@ -136,14 +138,22 @@ class VehicleService:
                 started = now()
                 async with asyncio.timeout(self.command_timeout):
                     # There is exactly one send; timeouts and renewal failures never replay it.
-                    receipt = await self.backend.submit_climate(command)
+                    dispatch_started = True
+                    try:
+                        receipt = await self.backend.submit_climate(command)
+                    except CommandRejected:
+                        # Only this narrow submission contract proves non-acceptance.
+                        dispatch_started = False
+                        raise
                     started = now()  # Require a new sample after the submission response.
                     while True:
                         result = cloud_result(await self.backend.result(receipt))
                         if result == "unknown":
                             raise RuntimeError("conflicting_cloud_result")
                         if result == "failed":
-                            raise ServiceError("cloud_rejected")
+                            self.store.transition(operation_id, Phase.FAILED, "cloud_rejected")
+                            logger.info("operation_failed")
+                            return
                         if result == "completed":
                             break
                         await asyncio.sleep(0.05)
@@ -174,8 +184,13 @@ class VehicleService:
                             return
                         await asyncio.sleep(0.05)
         except ServiceError as exc:
-            self.store.transition(operation_id, Phase.FAILED, exc.code)
-            logger.info("operation_failed")
+            if dispatch_started:
+                # Membership, permission or result lookup failures cannot undo a sent command.
+                self.store.transition(operation_id, Phase.UNKNOWN, "result_unknown_no_retry")
+                logger.info("operation_unknown")
+            else:
+                self.store.transition(operation_id, Phase.FAILED, exc.code)
+                logger.info("operation_failed")
         except asyncio.CancelledError:
             self.store.transition(operation_id, Phase.UNKNOWN, "interrupted_no_replay")
             raise

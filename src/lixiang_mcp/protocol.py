@@ -8,6 +8,7 @@ No login constants, signing secrets, device IDs, or network calls are included.
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -26,17 +27,25 @@ def climate_payload(command: ClimateCommand) -> dict[str, str | int]:
     return data
 
 
+def result_code(value: object) -> int | None:
+    """Only integer codes are evidence; blank/arbitrary strings and bools are unknown."""
+    if type(value) is int:
+        return value
+    if isinstance(value, str) and re.fullmatch(r"-?[0-9]{1,10}", value):
+        return int(value)
+    return None
+
+
 def cloud_result(data: dict[str, Any]) -> Literal["pending", "completed", "failed", "unknown"]:
     """Contradictory/missing terminal codes cannot prove success or safe rejection."""
-    state, code = data.get("pushState"), data.get("resultCode")
-    valid_code = type(code) in (int, str)
-    success = valid_code and code in (0, "0", -15, "-15", -8, "-8")
+    state, code = data.get("pushState"), result_code(data.get("resultCode"))
+    success = code in (0, -15, -8)
     if type(state) is not int:
         return "unknown"
     if state == 5:
         return "completed" if success else "unknown"
     if state == 7:
-        return "failed" if valid_code and not success else "unknown"
+        return "failed" if code is not None and not success else "unknown"
     return "pending"
 
 
