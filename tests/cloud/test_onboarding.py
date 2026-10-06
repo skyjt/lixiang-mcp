@@ -431,6 +431,50 @@ async def test_local_http_ui_security_duplicates_and_no_secret_echo(config, clou
             await wizard.close()
 
 
+async def test_file_entry_navigation_does_not_relax_api_or_cross_site_fetches(
+    config, cloud, tmp_path
+):
+    wizard = new_wizard(config, cloud, tmp_path / "setup")
+    token = "synthetic-entry-capability-" + "x" * 32
+    app = create_setup_app(wizard, token)
+    transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 30000))
+    navigation = {
+        "Sec-Fetch-Site": "cross-site",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+    }
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8765") as client:
+        try:
+            page = await client.get("/", headers=navigation)
+            assert page.status_code == 200 and token not in page.text
+            for path in ("/api/status", "/app.js", "/style.css", "/?extra=query"):
+                response = await client.get(
+                    path, headers={**navigation, "Authorization": "Bearer " + token}
+                )
+                assert response.status_code == 403
+            for extra in (
+                {"Sec-Fetch-Mode": "cors"},
+                {"Sec-Fetch-Dest": "iframe"},
+                {"Origin": "https://evil.invalid"},
+                {"Host": "evil.invalid"},
+            ):
+                assert (await client.get("/", headers={**navigation, **extra})).status_code == 403
+            response = await client.post(
+                "/api/action",
+                json={"action": "cancel", "revision": 0},
+                headers={
+                    **navigation,
+                    "Authorization": "Bearer " + token,
+                    "Origin": "http://127.0.0.1:8765",
+                },
+            )
+            assert response.status_code == 403
+            assert (await client.get("/api/status")).status_code == 401
+            assert not cloud.requests and wizard.state.revision == 0
+        finally:
+            await wizard.close()
+
+
 def test_private_storage_permissions_symlinks_lock_and_corruption(tmp_path):
     directory = tmp_path / "setup"
     store = SetupStore(directory)

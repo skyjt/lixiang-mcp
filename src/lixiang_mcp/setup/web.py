@@ -58,13 +58,21 @@ class LocalOnly:
         headers = Headers(scope=scope)
         peer = scope.get("client")
         origin = headers.get("origin")
+        # file:// launch.html is a cross-site top-level navigation. Only the public
+        # document may enter this way; APIs and cross-site subresource fetches may not.
+        entry_navigation = (
+            scope["method"] == "GET"
+            and scope["path"] == "/"
+            and headers.get("sec-fetch-mode") == "navigate"
+            and headers.get("sec-fetch-dest") == "document"
+        )
         if (
             peer is None
             or peer[0] != "127.0.0.1"
             or headers.get("host") != self.host
             or scope.get("query_string")
             or (origin is not None and origin != self.origin)
-            or headers.get("sec-fetch-site") == "cross-site"
+            or (headers.get("sec-fetch-site") == "cross-site" and not entry_navigation)
         ):
             await JSONResponse({"error": "local_browser_required"}, 403)(scope, receive, safe_send)
             return

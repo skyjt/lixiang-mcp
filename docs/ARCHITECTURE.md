@@ -52,7 +52,9 @@ CloudBackend 实际使用 `cloud.auth.AuthSession`：每个账号一套 cookie j
 
 Checkpoint 记录进度版本、账号设备、尝试次数与待选车辆；每次接受动作先落盘，再启动可取消任务。状态 GET 不登录，旧 revision 不执行；每账号 15 分钟最多 3 次显式尝试，每次最多一次密码登录。中断恢复需本人继续，取消阻止后台任务写回。官方 H5 使用同一设备；签名材料换设备需重新登录。
 
-账号会话成功仍可能停在签名材料缺失，不能跳过。选车后仅导出 vehicle:read，两个控制开关及能力均为 false。已有连接先停止 MCP 才可重新登录；取消恢复原配置，数据库保留，账号/车辆集合锁定。文件权限/加密与真实兼容性限制见 [ONBOARDING.md](ONBOARDING.md)。
+账号会话成功仍可能停在签名材料缺失，不能跳过。选车后仅导出 vehicle:read，两个控制开关及能力均为 false。已有连接先停止 MCP 才可重新登录；已提交配置是 VIN→vehicle_id 映射及车辆集合的稳定来源，云端临时候选列表不替换这份映射。取消恢复完整已提交选择，数据库保留，账号/车辆集合锁定。文件权限/加密与真实兼容性限制见 [ONBOARDING.md](ONBOARDING.md)。
+
+本机 `launch.html` 到 loopback 的跳转会被浏览器标为跨站导航。中间件仅对无秘密首页 `/` 的 GET 顶层 document 导航允许这个入口，仍检查 socket 地址、Host、Origin 和 query；API、跨站子资源或 iframe 不获得例外。API 继续要求独立 capability，POST 另要求同源 JSON。
 
 ## 日志
 
