@@ -4,6 +4,8 @@
 
 参考 [C3H3-AI/ha-lixiang v1.3.2](https://github.com/C3H3-AI/ha-lixiang/tree/7e9726bb7f78c5de376c88b271ac08fac8e2b997)，已研究登录/续期/签名/车辆选择/VSS/控制全链，并独立实现无默认秘密的协议层。详见 [源码证据与拆分决策](docs/SOURCE_RESEARCH.md) 及 [上游许可](docs/UPSTREAM.md)。
 
+本地接手请先读 [本地开发与只读验证交接](docs/LOCAL_HANDOFF.md)：包含精确开发分支/代码基线、依赖安装、mock/MCP/Docker 自检、真实材料清单与不打印秘密的配置步骤。代码仍在 `feat/standalone-mcp-v1` 和 [Draft PR #1](https://github.com/skyjt/lixiang-mcp/pull/1)，main 尚未合并；真实账号仅由本人以后在本地配置。
+
 ## 能做什么
 
 | MCP 工具 | 功能 | 服务端权限 |

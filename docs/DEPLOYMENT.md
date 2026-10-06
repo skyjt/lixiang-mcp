@@ -2,6 +2,8 @@
 
 本说明是待操作者执行的步骤；开发交付只在云开发环境中模拟测试，没有连接 NAS、MCPHub 或理想账号。默认模拟模式无需访问任何理想域名。实验性协议模式仅在未来安全配置后使用固定理想域名，详见 [PROTOCOL_ADAPTER.md](PROTOCOL_ADAPTER.md)。MCPHub 产品版本/实际配置结构未提供，下面是协议契约，不声称已经打通该网关。
 
+首次从 GitHub 拉取并在本人电脑上继续开发，请按 [本地交接](LOCAL_HANDOFF.md) 选择开发分支、跑 mock 和只读自检，再处理本页的 NAS/网关步骤。
+
 ## NAS 部署
 
 1. 检查 NAS 支持 Linux 容器、Python 3.12 镜像及 Docker Compose v2。开发环境验证 Linux amd64；ARM64 镜像和 NAS 品牌平台需要另行验证。

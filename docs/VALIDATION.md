@@ -12,6 +12,7 @@
 | Dockerfile 多阶段镜像构建 | 成功，固定 Python/uv/lock；开发代理需 build_ca 临时 secret |
 | Compose config / 非 root 容器 / healthcheck | 通过，uid/gid 10001，健康状态 healthy |
 | 容器官方 MCP 客户端 smoke | `PASS: initialize, 8 tools, 3 mock vehicles, sampled state` |
+| 本地交接流程演练 | 干净 clone 安装锁定依赖、生成 mock、官方客户端 smoke；私密配置生成和只读 SDK 示例均用合成材料验证，网络部分仅运行 mock |
 | wheel 打包 | 成功，包含本项目 LICENSE 和上游 MIT 原文 |
 | 拟提交文件 hygiene | 通过，扫描禁止路径、JWT、VIN 形态、手机号形态等 |
 | Gitleaks v8.30.0 拟公开目录扫描 | no leaks found |
