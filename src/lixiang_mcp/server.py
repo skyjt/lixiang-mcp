@@ -16,6 +16,7 @@ from .auth import BackendAuth, principal
 from .backend import Backend, MockBackend
 from .cloud.backend import CloudBackend
 from .cloud.config import load_cloud_config
+from .cloud.session_file import SessionFile
 from .cloud.transport import ProtocolError
 from .config import AuthConfig, Settings
 from .models import ClimateCommand, ServiceError, VehicleId
@@ -42,8 +43,16 @@ def create_app(settings: Settings, *, backend: Backend | None = None) -> ASGIApp
         if settings.backend == "lixiang":
             if settings.vehicle_secrets_file is None:
                 raise ValueError("vehicle_secrets_file_required")
+            cloud_config = load_cloud_config(settings.vehicle_secrets_file)
+            writer = (
+                SessionFile(settings.vehicle_secrets_file, cloud_config)
+                if settings.persist_vehicle_sessions
+                else None
+            )
             backend = CloudBackend(
-                load_cloud_config(settings.vehicle_secrets_file), ttl=settings.stale_after_seconds
+                cloud_config,
+                ttl=settings.stale_after_seconds,
+                on_session_update=writer.update if writer else None,
             )
         else:
             backend = MockBackend(fault=settings.mock_fault, ttl=settings.stale_after_seconds)

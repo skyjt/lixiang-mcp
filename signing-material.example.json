@@ -1,0 +1,6 @@
+{
+  "device_id": "YOUR_OWN_SIGNING_DEVICE_ID",
+  "key_id": "YOUR_OWN_KEY_ID",
+  "hac_key_hex": "YOUR_OWN_32_BYTE_KEY_AS_64_HEX",
+  "app_token": "YOUR_OWN_APP_TOKEN"
+}

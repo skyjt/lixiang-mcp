@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 import httpx
@@ -19,7 +20,7 @@ from ..models import (
 )
 from .api import VehicleAPI
 from .auth import AuthSession
-from .config import CloudConfig, VehicleBinding
+from .config import CloudConfig, SavedSession, VehicleBinding
 from .crypto import Signer
 from .signals import LOCATION_PATH, PATHS, location_from_vss, state_from_vss
 from .transport import ACCOUNT, API, ID, CloudHTTP
@@ -54,6 +55,7 @@ class CloudBackend:
         *,
         ttl: float = 120,
         transport_factory: Callable[[], httpx.AsyncBaseTransport] | None = None,
+        on_session_update: Callable[[str, SavedSession], Awaitable[None]] | None = None,
     ) -> None:
         self.config, self.ttl = config, ttl
         # Mock transport injection is a Python test seam, never a JSON/MCP configuration choice.
@@ -74,7 +76,15 @@ class CloudBackend:
                 frozenset({API}), transport=transport_factory() if transport_factory else None
             )
             self._clients.extend((login_http, api_http))
-            auth = AuthSession(config.profile, account, login_http)
+            auth = AuthSession(
+                config.profile,
+                account,
+                login_http,
+                saved=account.saved_session,
+                on_update=partial(on_session_update, account.account_id)
+                if on_session_update
+                else None,
+            )
             self._apis[account.account_id] = VehicleAPI(
                 config.profile,
                 auth,

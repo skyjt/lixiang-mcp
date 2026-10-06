@@ -8,8 +8,8 @@
 
 | 流程 | 实现与测试 | 尚需验证/限制 |
 | --- | --- | --- |
-| PKCE/PAKE | seed、bcrypt salted/seeded 两支、Ed25519 proof、code/state 校验、code 换 token | 只覆盖上游密码链；短信/验证码/新挑战明确拒绝；state 缺失也拒绝 |
-| 账号会话 | 每账号 cookie jar 和锁，主 token refresh 轮换，cookie 失效限定重登一次 | 内存会话，不持久化 refresh/cookie；重启重建；真实风控未知 |
+| PKCE/PAKE | seed、bcrypt salted/seeded、Ed25519 proof、code/state 校验、code 换 token | 已知额外验证交由本人官方 H5 完成，再明确继续；未知挑战/state 缺失仍拒绝，未实测 |
+| 账号会话 | 每账号 cookie jar/锁、主 token refresh、私密快照恢复及可选轮换写回 | 本机向导默认保存；通用配置默认不写回；只读 secret 挂载不支持写回；真实风控未知 |
 | scope token | cookie /api/auth、Location fragment、按 audience+完整 scope 缓存、expires_in 保守上界 | 不使用未验签 JWT claims 授权；缺失响应 scope 只能依赖服务器按请求授权 |
 | MESH/VAT | 同锁成对获取；若其中一次交换重建会话，重新获取整组 | 只请求空调 VAT 和 send/result MESH；最小 scope 服务端兼容性未实测 |
 | x-chj 签名 | 实际 body bytes 的 MD5、11 字段及末尾换行、原始 key HMAC；上游合成向量对照 | app/device/key 一致性由外部材料保证；没有默认第三方秘密 |
@@ -20,7 +20,9 @@
 
 `signals.py` 明确保留充电原始 `charge_status_code`，只映射有源码证据的布尔状态；不把上游 raw 与 normalized 状态码混为一谈。CLTC 总续航只在电/油两项都存在时求和，缺失项不补零（纯电车型可能总续航为 unknown，纯电续航仍可读）。位置由专用路径读取，普通状态请求不会请求位置。
 
-## 外部文件（仅未来经授权配置）
+## 普通首次接入与高级配置
+
+普通用户先运行 `uv run lixiang-setup`，见 [ONBOARDING.md](ONBOARDING.md)。公开应用 profile 已按上游版本内置，不要求用户逐字段填写；设备自动初始化/保存、本人官方网页验证、导入本人签名材料、显式选车后自动生成下列文件。以下完整 JSON 模板仅供高级开发和排障，不能代表普通接入所需表单。
 
 `vehicle-protocol.example.json` 是结构模板，**刻意不可运行**：不含有效账号、手机号、VIN、设备 ID、签名材料、第三方 client/audience 或 app 版本参数。操作者需要通过安全渠道获取有权使用的材料，把私密文件放在 Git 忽略的目录或 secret manager 挂载点。
 
@@ -40,4 +42,4 @@
 
 读取遇到 401 最多重新获取相关 scope 后重试一次。控车 POST 不因 401、5xx、网络错误或无 receipt 重发。云端状态矛盾不算成功/明确失败，转 unknown 并拦截该车的新写入。命令可能在本地超时之后继续在云端有效期内执行；不得据 unknown 认为车辆没有变化。
 
-本版本不实现：短信/验证码的完成流程、设备注册以外的设备信任建立、第三方签名材料获取、持久化 cookie/refresh、车型资源数据库、充电/宠物模式、唤醒和任意命令、未知操作的人工恢复管理 API。所有真实账号/设备/网关/NAS 验证仍留待明确授权的后续阶段。
+本版本不实现：代填/绕过官方验证码、个人签名材料自动生成/提取、车型资源数据库、充电/宠物模式、唤醒和任意命令、未知操作人工恢复管理 API。已提供官方 H5 本人验证后的本地继续流程与私密会话轮换；实际设备信任、账号/网关/NAS 仍需本人后续验证。

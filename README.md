@@ -82,7 +82,9 @@ uv run python scripts/smoke_client.py
 
 `cloud/` 已实现 PKCE/PAKE、cookie 登录会话、主 token refresh、scope 缓存、外部密钥 HMAC、SAOS 列表、受限 VSS 和空调双 token 请求。完整流程用模拟 HTTP 契约及合成加密向量验证，也通过 MCP 路由测试。尚未使用真实材料联网，默认配置不会创建真实连接。
 
-真实模式必须另行提供私密 `vehicle_secrets_file`，没有上游硬编码秘密或自动凭据发现。短信/验证码不支持，未知车型不能控制；真实控制还要求单独的 `allow_real_control`、精确车型能力和用户 grant。参数和剩余未知见 [协议适配与安全配置](docs/PROTOCOL_ADAPTER.md)。
+本人首次接入运行 `uv run lixiang-setup`：本机页面只问手机号/密码，内置公开应用配置并保存设备身份；必要时本人去理想官网完成 H5 验证，返回后明确继续。账号登录后导入本人配套签名材料、核对设备并选车，向导生成默认只读配置。完整步骤见 [本机首次接入](docs/ONBOARDING.md)。
+
+**签名材料仍是实际前置条件**：指定上游没有从密码登录生成个人 HMAC key 的实现；本项目不复制作者设备默认密钥。缺材料会停在明确提示步骤，不声称车辆 API 已就绪。验证码只在官网输入，账号材料不经过 MCP/MCPHub。会话可受保护地持久化，未知车型不可控；细节见 [协议适配与安全配置](docs/PROTOCOL_ADAPTER.md)。
 
 ## 检查
 

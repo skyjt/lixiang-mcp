@@ -21,6 +21,7 @@ class AuthConfig(Model):
 class Settings(Model):
     backend: Literal["mock", "lixiang"] = "mock"
     vehicle_secrets_file: Path | None = None
+    persist_vehicle_sessions: bool = False
     auth_file: Path
     database: Path = Path("runtime/operations.sqlite")
     enable_control: bool = False

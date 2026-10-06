@@ -17,12 +17,12 @@ HA config_flow / auth_web → ConfigEntry 中的账号、设备、签名配置
 
 | 文件（固定版本） | 证据位置与用途 | 适配决定 |
 | --- | --- | --- |
-| [pake_login.py](https://github.com/C3H3-AI/ha-lixiang/blob/7e9726bb7f78c5de376c88b271ac08fac8e2b997/custom_components/lixiang_auto/pake_login.py#L80) | 80–132 seed/proof；201–279 登录六步；282–293 refresh | 重写为异步、受限 HTTP 流程和纯加密函数；不带默认设备、密码或第三方参数 |
+| [pake_login.py](https://github.com/C3H3-AI/ha-lixiang/blob/7e9726bb7f78c5de376c88b271ac08fac8e2b997/custom_components/lixiang_auto/pake_login.py#L80) | 80–132 seed/proof；201–279 登录六步；282–293 refresh | 重写为异步、受限 HTTP 流程和纯加密函数；不带默认设备、密码或签名秘密 |
 | [li_api.py](https://github.com/C3H3-AI/ha-lixiang/blob/7e9726bb7f78c5de376c88b271ac08fac8e2b997/custom_components/lixiang_auto/li_api.py#L345) | 345–449 cookie 会话和 scope 缓存；453–486 签名 | 这是主链路。拆为账号 AuthSession、Signer、窄 API；按账号及 scope/audience/VIN 隔离 |
 | [auth.py](https://github.com/C3H3-AI/ha-lixiang/blob/7e9726bb7f78c5de376c88b271ac08fac8e2b997/custom_components/lixiang_auto/auth.py#L43) / client.py | curl Bearer-only 换 token、旧 commandKey 控车 | 不作为主适配：与 LiApiClient 的 cookie / 双 token / cmdKey 流程不一致；不复制默认设备身份 |
 | [signer.py](https://github.com/C3H3-AI/ha-lixiang/blob/7e9726bb7f78c5de376c88b271ac08fac8e2b997/custom_components/lixiang_auto/signer.py#L78) | 78–129 MD5、11 行、末尾换行、HMAC-SHA256 | 可复用算法；密钥只接受外部原始 32 字节的明确编码，不保留 ASCII 猜测回退 |
-| auth_web.py / config_flow.py / login_page.html | HA HTTP 视图、临时登录会话、官方 H5 辅助与密码轮询 | 研究但不移植；短信/滑块需单独可信交互设计，当前明确阻断 |
-| identity.py | 121–170 按账号存设备 ID，HA executor 持久化 | 不读取用户既有身份文件，不生成“可信设备”或复制 bootstrap 身份；设备由外部配置明确提供 |
+| auth_web.py / config_flow.py / login_page.html | HA HTTP 视图、临时登录会话、官方 H5 辅助与密码轮询 | 采用 config_flow 当前的官网直链方案和独立本机向导，不搬 HA 辅助页；验证码仅在官网输入，本人返回后有限尝试 |
+| identity.py | 121–170 按账号存设备 ID，HA executor 持久化 | 新设备本机随机生成/持久化，是否受信任由官方验证决定；不读取既有 HA 身份或复制 bootstrap；签名设备不一致时明确重新验证 |
 | [vehicle_role.py](https://github.com/C3H3-AI/ha-lixiang/blob/7e9726bb7f78c5de376c88b271ac08fac8e2b997/custom_components/lixiang_auto/vehicle_role.py#L108) | 108–167 owned / authorized / inviting / transferring；未知 role 默认 family | 拒绝未知 role、邀请、转移/接收中及不可用状态；配置别名 + 当前归属双重匹配。owner 缺少明确的非过户接收标志不放行写入。绝不选列表第一辆 |
 | [signals.py](https://github.com/C3H3-AI/ha-lixiang/blob/7e9726bb7f78c5de376c88b271ac08fac8e2b997/custom_components/lixiang_auto/signals.py#L165) / rendering.py | 信号路径、单位、枚举解释 | 抽取本首版小型白名单，严格类型/范围；未知枚举/缺失采样不猜值；位置单独路径 |
 | features.py / vehicle_ability.py | 能力来源优先级：APK 车型资源 → variableModel → 硬编码 → VSS 探测 | 不复制 APK 资源；VSS 有值不证明硬件存在。要求外部经审阅的精确 modelId 能力配置；默认未知、不可控 |
@@ -34,8 +34,8 @@ HA config_flow / auth_web → ConfigEntry 中的账号、设备、签名配置
 2. 打开 `account.lixiang.com/login` 初始化页面会话；`/api/devices` 注册**明确提供**的设备 profile。设备登记参数只采纳固定版本证据，不猜另一个移动平台的参数。
 3. `/api/idps` 提交 LI_USER/PASSWORD、用户提示和 seed。seed 是 SHA256(password) 的大整数模固定 128-bit 模数，补齐 32 hex。seed 是密码派生敏感值，不记录。
 4. `t_login_use` 的 `option`/`kdf` 指定 bcrypt salt 头；盐来自 `salted`（hex 编码字符，跳过零字节）或 `seeded`（16 字节转 bcrypt 字母表）。bcrypt 输出再 SHA256 得到 Ed25519 signing seed；签名消息是 SHA256(snonce 后缀 hex + 随机 cnonce)。拒绝未知算法、畸形/超大挑战和过高 bcrypt cost，防止挑战放大计算。
-5. `/api/login` 接受 200/300/302，读取 Location/JSON location 中授权码；`require=SMS_CODE` 表示额外验证，必须停止。上游 `config_flow.py:275–417` / `auth_web.py:114–171` 提供官方 H5 页面辅助：用户在浏览器完成滑块/短信，后台再用同一设备+密码检测信任；`async_step_sms` 转交浏览器步骤。它没有可直接抽取的服务端短信/验证码完成协议。本项目不复制 HA 登录页面会话、自动反复试密码或默认设备引导，不跳过挑战或自造接口。适配器检查 redirect 目标与 state，不跟随返回地址发送凭据；缺少 state 也拒绝，并列为需实测兼容项。
-6. `/api/token` 用 code + verifier 换主 token 和 refresh_token。主 token refresh 轮换不等价于重建 SSO cookie。上游 `_sync_parent_domain_cookies` 为 H5 把 cookie 扩散到 `.lixiang.com`；NAS 不使用 H5，因此不扩大 cookie 域。
+5. `/api/login` 接受 200/300/302，读取 Location/JSON location 中授权码；`require=SMS_CODE` 表示额外验证，暂停本次协议尝试，交由本机向导引导本人完成官方验证后明确继续。上游 `config_flow.py:275–417,482–547` 直接提供官方 H5 链接，`auth_web.py:114–171` 另有辅助页面：用户在浏览器完成滑块/短信，后台再用同一设备+密码检测信任；`async_step_sms` 转交浏览器步骤。它没有可直接抽取的服务端短信/验证码完成协议。本项目不复制 HA 登录页面会话、自动反复试密码或默认设备引导，不跳过挑战或自造接口。适配器检查 redirect 目标与 state，不跟随返回地址发送凭据；缺少 state 也拒绝，并列为需实测兼容项。
+6. `/api/token` 用 code + verifier 换主 token 和 refresh_token。主 token refresh 轮换不等价于重建 SSO cookie。上游为辅助 H5 把 cookie 扩散到 `.lixiang.com`；本机向导由独立浏览器直接访问官网，不转交后端 cookie，因此不扩大后端 cookie 域。
 
 真正 VSS/控制链路的 scope exchange 是带会话 cookie 的 `/api/auth`（response_type=token），从 Location fragment 取 access_token。不能拿旧 `exchange_scope_token(main_bearer, ...)` 当成已验证替代品。缓存键必须包含 audience、完整 scope 和车辆，不采用单一 `vat` 名称混用多车。
 
@@ -43,13 +43,13 @@ HA config_flow / auth_web → ConfigEntry 中的账号、设备、签名配置
 
 本项目账号对象独占 cookie jar；续期/登录/scope exchange 共用账号锁；使用响应 expires_in（并受上游保守 TTL 上界限制），不把未验签 JWT 的 claims 当授权事实。cookie 登录失效可在**读请求前**受限重建一次；不在控车 POST 后通过重登重发。风险挑战进入阻断态，等待外部人工处理，避免反复撞风控。
 
-主 token/refresh_token 和 cookie 仅存于进程私有内存；首版不持久化到普通配置或 SQLite。后续 secret-store 保存轮换 token 是独立扩展，当前进程重启需要重新建立会话。不能声称已经实现 HA ConfigEntry 的持久化等价物。
+本机向导在加密检查点内保存主 token/refresh/cookie，并将配套快照导出到 0600 协议配置。后端可显式开启 SessionFile 轮换写回，校验设备/profile/配置摘要并原子替换；不写入操作 SQLite。密钥/文件权限及只读挂载限制见 ONBOARDING.md。实际 cookie 生命周期仍未实测。
 
 ## 签名和请求隔离
 
 签名串为 env、appVersion、keyId、deviceId、method、Accept、Content-Language、base64(MD5(实际发送 body bytes))、Content-Type、timestamp、nonce，逐项换行且末尾也有换行。签名是 base64(HMAC-SHA256(原始密钥字节, 签名串))。path 不在该基线签名串中，因此 HTTP 层必须固定 host 和端点，禁止签名变成任意 URL 请求入口。
 
-签名所需 key、key_id、设备 ID、app token，以及登录 client/audience/版本参数都由独立外部安全文件注入，不带上游默认值。API client 和账号登录 client 分离 cookie；不把 SSO cookie 或主 token发往 api-app。MCPHub bearer 永远不进入这些对象。禁用自动 redirects、环境代理继承和 HTTP 自动 retries，保留 TLS 验证、超时和响应大小上限。
+非秘密 client/audience/版本/User-Agent 来自该固定版本，内置于 cloud/profiles.py；普通用户无需填写。签名 key/key_id/app token 仅接受本人私密材料，设备本地生成或经明确重新验证后对齐材料，不带作者默认设备/签名秘密。API client 和账号登录 client 分离 cookie；不把 SSO cookie 或主 token发往 api-app。MCPHub bearer 永远不进入这些对象。禁用自动 redirects、环境代理继承和 HTTP 自动 retries，保留 TLS 验证、超时和响应大小上限。
 
 ## 车辆、VSS 与能力
 
@@ -74,4 +74,4 @@ VSS（906–973）请求 body 含 VIN 与 paths，返回 items/path/dp/value/tsF
 
 MIT 原文保留在 `licenses/ha-lixiang-MIT.txt`，派生的 proof、signing、API、信号模块均注明来源。**MIT 不自动覆盖 APK/品牌/设备身份数据的再分发权**；不纳入车型 JSON、app_config、sub_token_data、图片或上游硬编码秘密。协议常量与小范围代码按源码证据重新组织；外部配置示例只有字段结构与不可运行占位。
 
-未解决且不猜测：短信/验证码/其他风控挑战；真实 SSO 有效期与 refresh 恢复 cookie 能力；返回 redirect 是否总携带 state；最小 VAT scope 是否被服务端接受；role 的过户 receiver 未知实现；完整车型/年款能力数据库；真实 tsFormat 时区/信号枚举和空调结果冲突的权威语义；secret-store 轮换持久化；MCPHub 实际逐用户凭据和 NAS 实机。模拟 HTTP 测试能证明编码、隔离、状态机和失败策略，不能证明账号或车辆端接受。
+未解决且不猜测：官方 H5 本人验证后的真实信任/其他风控挑战、个人签名材料初始化；真实 SSO 有效期与 refresh 恢复 cookie 能力；返回 redirect 是否总携带 state；最小 VAT scope 是否被服务端接受；role 的过户 receiver 未知实现；完整车型/年款能力数据库；真实 tsFormat 时区/信号枚举和空调结果冲突的权威语义；托管 secret-store/OS Keychain 集成；MCPHub 实际逐用户凭据和 NAS 实机。模拟 HTTP 测试能证明编码、隔离、状态机和失败策略，不能证明账号或车辆端接受。

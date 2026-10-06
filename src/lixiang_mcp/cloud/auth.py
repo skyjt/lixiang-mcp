@@ -11,13 +11,16 @@ import base64
 import hashlib
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from http.cookiejar import Cookie
 from typing import Any
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
 import httpx
+from pydantic import SecretStr
 
-from .config import AccountSecrets, Profile
+from .config import LoginCredentials, Profile, SavedCookie, SavedSession
 from .crypto import create_proof, create_seed
 from .transport import ACCOUNT, ID, CloudHTTP, ProtocolError, object_body
 
@@ -51,7 +54,16 @@ def expiration(value: Any, maximum: int) -> float:
 
 
 class AuthSession:
-    def __init__(self, profile: Profile, account: AccountSecrets, http: CloudHTTP) -> None:
+    def __init__(
+        self,
+        profile: Profile,
+        account: LoginCredentials,
+        http: CloudHTTP,
+        *,
+        saved: SavedSession | None = None,
+        login_limit: int | None = None,
+        on_update: Callable[[SavedSession], Awaitable[None]] | None = None,
+    ) -> None:
         self.profile, self.account, self.http = profile, account, http
         self._lock = asyncio.Lock()
         self._main: CachedToken | None = None
@@ -59,6 +71,97 @@ class AuthSession:
         self._scopes: dict[tuple[str, str], CachedToken] = {}
         self._blocked = False
         self._generation = 0
+        self._login_limit, self._login_attempts = login_limit, 0
+        self._on_update = on_update
+        if saved is not None:
+            self._restore(saved)
+
+    def _profile_digest(self) -> str:
+        return hashlib.sha256(self.profile.model_dump_json().encode()).hexdigest()
+
+    def _account_digest(self) -> str:
+        phone = self.account.phone.get_secret_value()
+        phone = phone if phone.startswith("+") else "+86" + phone
+        return hashlib.sha256((self.account.account_id + "\0" + phone).encode()).hexdigest()
+
+    def _restore(self, saved: SavedSession) -> None:
+        if (
+            saved.device_id != self.account.device_id
+            or saved.account_digest != self._account_digest()
+            or saved.profile_digest != self._profile_digest()
+        ):
+            raise ProtocolError("saved_session_identity_mismatch")
+        self._main = CachedToken(
+            saved.access_token.get_secret_value(),
+            time.monotonic() + min(3600, saved.expires_at - time.time()),
+        )
+        self._refresh = saved.refresh_token.get_secret_value()
+        for item in saved.cookies:
+            self.http.client.cookies.jar.set_cookie(
+                Cookie(
+                    0,
+                    item.name,
+                    item.value.get_secret_value(),
+                    None,
+                    False,
+                    item.domain,
+                    True,
+                    item.domain.startswith("."),
+                    item.path,
+                    True,
+                    item.secure,
+                    item.expires,
+                    item.expires is None,
+                    None,
+                    None,
+                    {},
+                    False,
+                )
+            )
+
+    def _snapshot(self) -> SavedSession:
+        if self._main is None:
+            raise ProtocolError("account_session_missing")
+        return SavedSession(
+            device_id=self.account.device_id,
+            account_digest=self._account_digest(),
+            profile_digest=self._profile_digest(),
+            access_token=SecretStr(self._main.value),
+            refresh_token=SecretStr(self._refresh),
+            expires_at=max(0, time.time() + self._main.expires_at - time.monotonic()),
+            cookies=[
+                SavedCookie(
+                    name=c.name,
+                    value=SecretStr(c.value or ""),
+                    domain=c.domain,
+                    path=c.path,
+                    secure=c.secure,
+                    expires=c.expires,
+                )
+                for c in self.http.client.cookies.jar
+                if c.domain.lstrip(".") in {"id.lixiang.com", "account.lixiang.com"}
+            ],
+        )
+
+    async def establish_session(self) -> SavedSession:
+        """One explicit local setup attempt; does not fetch vehicles or bypass challenges."""
+        async with self._lock:
+            if self._blocked:
+                raise ProtocolError("account_requires_operator_attention")
+            try:
+                await self._ensure_session()
+                return self._snapshot()
+            except ProtocolError:
+                self._blocked = True
+                raise
+
+    async def snapshot(self) -> SavedSession:
+        async with self._lock:
+            return self._snapshot()
+
+    async def _publish(self) -> None:
+        if self._on_update is not None:
+            await self._on_update(self._snapshot())
 
     def _headers(self) -> dict[str, str]:
         p, device = self.profile, self.account.device_id.get_secret_value()
@@ -104,6 +207,9 @@ class AuthSession:
 
     async def _login(self) -> None:
         # Call only while holding the account lock. A new session discards stale cookies.
+        if self._login_limit is not None and self._login_attempts >= self._login_limit:
+            raise ProtocolError("explicit_login_retry_required")
+        self._login_attempts += 1
         self.http.client.cookies.clear()
         self._main, self._refresh = None, ""
         self._scopes.clear()
@@ -224,6 +330,7 @@ class AuthSession:
         self._save_main(object_body(response))
         self._generation += 1
         self._scopes.clear()
+        await self._publish()
 
     async def _ensure_session(self) -> None:
         if self._main is None:
@@ -248,6 +355,7 @@ class AuthSession:
                 raise ProtocolError("token_refresh_failed")
             else:
                 self._save_main(object_body(response))
+                await self._publish()
 
     async def _exchange(self, audience: str, scope: str, ttl: int) -> CachedToken:
         response = await self.http.request(
@@ -322,6 +430,7 @@ class AuthSession:
                 await self._login()
                 result = await self._exchange(audience, scope, ttl)
             self._scopes[key] = result
+            await self._publish()
             return result.value
         except ProtocolError as exc:
             if exc.code not in {"upstream_network_error", "token_refresh_failed"}:

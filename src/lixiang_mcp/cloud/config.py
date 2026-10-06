@@ -14,8 +14,9 @@ HeaderText = Annotated[str, Field(min_length=1, max_length=512, pattern=r"^[\x20
 
 
 class Profile(Model):
-    """All app identifiers come from operator configuration, never upstream secret defaults."""
+    """Versioned public application parameters; never signing secrets or device identities."""
 
+    profile_id: HeaderText = "custom"
     client_id: HeaderText
     redirect_uri: HeaderText
     login_audience: HeaderText
@@ -45,29 +46,64 @@ class Profile(Model):
         return value
 
 
-class AccountSecrets(Model):
+class SavedCookie(Model):
+    name: str = Field(min_length=1, max_length=256)
+    value: SecretStr
+    domain: str = Field(pattern=r"^\.?(id|account)\.lixiang\.com$")
+    path: str = Field(default="/", pattern=r"^/", max_length=512)
+    secure: bool = True
+    expires: int | None = None
+
+
+class SavedSession(Model):
+    device_id: SecretStr
+    account_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    profile_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    access_token: SecretStr
+    refresh_token: SecretStr
+    expires_at: float = Field(ge=0, allow_inf_nan=False)
+    cookies: list[SavedCookie] = Field(max_length=100)
+
+
+class LoginCredentials(Model):
     account_id: VehicleId
     phone: SecretStr
     password: SecretStr
     device_id: SecretStr
-    key_id: SecretStr
-    hac_key_hex: SecretStr
-    app_token: SecretStr
 
     @model_validator(mode="after")
-    def valid_secrets(self) -> AccountSecrets:
+    def valid_login(self) -> LoginCredentials:
         import re
 
         if not re.fullmatch(r"\+?[0-9]{6,20}", self.phone.get_secret_value()):
             raise ValueError("invalid_phone_format")
         if not 1 <= len(self.password.get_secret_value().encode()) <= 72:
             raise ValueError("unsupported_password_length")
+        if not re.fullmatch(r"[\x21-\x7e]{1,512}", self.device_id.get_secret_value()):
+            raise ValueError("invalid_device_identity")
+        return self
+
+
+class SigningMaterial(Model):
+    device_id: SecretStr
+    key_id: SecretStr
+    hac_key_hex: SecretStr
+    app_token: SecretStr
+
+    @model_validator(mode="after")
+    def valid_signing(self) -> SigningMaterial:
+        import re
+
         if not re.fullmatch(r"[a-fA-F0-9]{64}", self.hac_key_hex.get_secret_value()):
             raise ValueError("signing_key_requires_32_bytes_hex")
         for value in (self.device_id, self.key_id, self.app_token):
             if not re.fullmatch(r"[\x21-\x7e]{1,512}", value.get_secret_value()):
                 raise ValueError("invalid_secret_header")
         return self
+
+
+class AccountSecrets(LoginCredentials, SigningMaterial):
+    saved_session: SavedSession | None = None
 
 
 class VehicleBinding(Model):

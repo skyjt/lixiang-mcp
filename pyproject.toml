@@ -14,8 +14,12 @@ dependencies = ["mcp==1.26.0", "pydantic==2.12.5", "uvicorn==0.41.0", "starlette
 
 [project.scripts]
 lixiang-mcp = "lixiang_mcp.server:main"
+lixiang-setup = "lixiang_mcp.setup.web:main"
 
 [dependency-groups]
+browser = [
+    "playwright==1.62.0",
+]
 dev = ["pytest==9.0.2", "pytest-asyncio==1.3.0", "httpx==0.28.1", "ruff==0.15.4", "mypy==1.19.1"]
 
 [tool.pytest.ini_options]

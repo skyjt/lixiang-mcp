@@ -22,3 +22,5 @@
 其他依赖由 `uv.lock` 固定并从包源安装；MCP 接入使用 [官方 Python SDK](https://github.com/modelcontextprotocol/python-sdk/tree/v1.26.0) v1.26.0。授权边界参考 [MCP Security Best Practices](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices)，明确不做 token passthrough。
 
 后续完整研究、冲突证据、HA 拆分和未验证参数见 [SOURCE_RESEARCH.md](SOURCE_RESEARCH.md)；实现和配置状态以 [PROTOCOL_ADAPTER.md](PROTOCOL_ADAPTER.md) 为准。
+
+本机向导补充：`cloud/profiles.py` 只纳入指定版本的非秘密应用标识、受众、scope、版本和 User-Agent；官方 H5 链接依据 `config_flow._browser_ph`，不移植 HA 辅助页面或复制作者设备。个人签名初始化的证据缺口、xdev/device_id 不一致及处理方式见 [ONBOARDING.md](ONBOARDING.md)。派生模块继续使用本文件所列 MIT 许可。

@@ -17,6 +17,8 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest -q
+      - run: uv sync --frozen --group browser
+      - run: uv run --group browser python scripts/qa_onboarding_browser.py --browser-executable "$(command -v google-chrome)"
       - run: python scripts/check_public_tree.py
       - run: python scripts/create_demo_config.py
       - run: cp config.docker.example.json config.docker.local.json
@@ -24,5 +26,6 @@ jobs:
       - run: chmod 644 runtime/auth.json config.docker.local.json
       - run: docker compose config --quiet && docker compose up -d --build --wait
       - run: uv run python scripts/smoke_client.py
+      - run: uv run python scripts/readonly_client.py --config config.docker.local.json --token-file runtime/demo-token
       - if: always()
         run: docker compose down -v

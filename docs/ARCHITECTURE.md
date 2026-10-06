@@ -42,9 +42,17 @@ unknown 后没有模型可调用的清除/重试接口。演练时可以停止�
 
 ## 账号会话续期
 
-CloudBackend 实际使用 `cloud.auth.AuthSession`：每个账号一套 cookie jar 和锁；锁内串行登录、主 token refresh、scope 交换和缓存失效。缓存键为 audience+完整 scope（VAT 包含 VIN）。成对获取 MESH/VAT 时检查会话 generation，重建 cookie 会话会重取整组。账号挑战失败关闭后阻断，不反复登录。主 token/refresh/cookie 仅内存保存，没有 HA ConfigEntry 持久化。
+CloudBackend 实际使用 `cloud.auth.AuthSession`：每个账号一套 cookie jar 和锁；锁内串行登录、主 token refresh、scope 交换和缓存失效。缓存键为 audience+完整 scope（VAT 包含 VIN）。成对获取 MESH/VAT 时检查会话 generation，重建 cookie 会话会重取整组。账号挑战失败关闭后阻断，不反复登录。可从与设备/profile 绑定的私密快照恢复主 token/refresh/cookie。`persist_vehicle_sessions` 默认关闭，向导生成的本机配置开启它；SessionFile 在独立锁内核对配置摘要、原子写回，失败不忽略。没有将凭据写入操作 SQLite。
 
 旧 `session.py` 的通用 Provider 接口及其测试保留供兼容；CloudBackend 不经过其中的 Unconfigured 占位类。实际调用链、外部安全配置和剩余未知见 [PROTOCOL_ADAPTER.md](PROTOCOL_ADAPTER.md)。
+
+## 独立本机接入
+
+`lixiang-setup` 是另一个仅监听 loopback 的进程，不挂载到 MCP。本机浏览器能力凭据、精确 Host/Origin/来源检查、16 KiB 请求上限、禁止 iframe 和缓存保护账号输入。普通表单只有手机号/密码；版本化 profile 不含设备或签名秘密。
+
+Checkpoint 记录进度版本、账号设备、尝试次数与待选车辆；每次接受动作先落盘，再启动可取消任务。状态 GET 不登录，旧 revision 不执行；每账号 15 分钟最多 3 次显式尝试，每次最多一次密码登录。中断恢复需本人继续，取消阻止后台任务写回。官方 H5 使用同一设备；签名材料换设备需重新登录。
+
+账号会话成功仍可能停在签名材料缺失，不能跳过。选车后仅导出 vehicle:read，两个控制开关及能力均为 false。已有连接先停止 MCP 才可重新登录；取消恢复原配置，数据库保留，账号/车辆集合锁定。文件权限/加密与真实兼容性限制见 [ONBOARDING.md](ONBOARDING.md)。
 
 ## 日志
 
