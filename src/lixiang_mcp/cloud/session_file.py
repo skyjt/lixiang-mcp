@@ -44,12 +44,21 @@ class SessionFile:
     async def update(self, account_id: str, session: SavedSession) -> None:
         async with self._lock:
             work = asyncio.create_task(asyncio.to_thread(self._write, account_id, session))
+            cancelled = False
+            # A thread cannot be cancelled. Shield every wait, including after repeated
+            # cancellation, and keep the writer lock until the actual write has finished.
+            while not work.done():
+                try:
+                    await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    cancelled = True
+                except Exception:
+                    break
             try:
-                await asyncio.shield(work)
-            except asyncio.CancelledError:
-                # A thread cannot be cancelled. Hold the writer lock until its atomic write
-                # finishes, so shutdown/retry cannot let an older rotation overwrite a newer one.
-                await asyncio.gather(work, return_exceptions=True)
-                raise
+                work.result()
             except Exception:
+                # Persistence failure takes precedence over caller cancellation so the
+                # account observes the error and blocks further use of in-memory tokens.
                 raise ProtocolError("private_session_persistence_failed") from None
+            if cancelled:
+                raise asyncio.CancelledError

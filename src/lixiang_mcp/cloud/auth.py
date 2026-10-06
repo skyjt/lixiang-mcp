@@ -429,8 +429,8 @@ class AuthSession:
                     raise
                 await self._login()
                 result = await self._exchange(audience, scope, ttl)
-            self._scopes[key] = result
             await self._publish()
+            self._scopes[key] = result
             return result.value
         except ProtocolError as exc:
             if exc.code not in {"upstream_network_error", "token_refresh_failed"}:

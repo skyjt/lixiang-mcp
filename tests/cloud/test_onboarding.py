@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import threading
+import time
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -15,7 +17,7 @@ from lixiang_mcp.cloud.profiles import builtin_profile
 from lixiang_mcp.cloud.session_file import SessionFile
 from lixiang_mcp.cloud.transport import ACCOUNT, ID, CloudHTTP, ProtocolError
 from lixiang_mcp.config import AuthConfig, Settings
-from lixiang_mcp.models import ClimateCommand, ServiceError
+from lixiang_mcp.models import ClimateCommand, Phase, ServiceError
 from lixiang_mcp.private_files import private_read, private_write, secret_json
 from lixiang_mcp.service import VehicleService
 from lixiang_mcp.setup.storage import SetupStore
@@ -509,14 +511,16 @@ async def test_session_persistence_refuses_changed_config_without_leaking(config
         await backend.close()
 
 
+@pytest.mark.parametrize("cancel_count", [1, 2])
 async def test_cancelled_session_write_cannot_overwrite_a_later_rotation(
-    config, cloud, tmp_path, monkeypatch
+    config, cloud, tmp_path, monkeypatch, cancel_count
 ):
     path = tmp_path / "protocol.json"
     private_write(path, secret_json(config))
     writer = SessionFile(path, config)
     backend = CloudBackend(config, transport_factory=cloud.transport)
     release, entered = threading.Event(), threading.Event()
+    tasks = []
     try:
         await backend.vehicles("account-a")
         snapshot = await backend._apis["account-a"].auth.snapshot()
@@ -527,15 +531,19 @@ async def test_cancelled_session_write_cannot_overwrite_a_later_rotation(
             calls.append(session)
             if len(calls) == 1:
                 entered.set()
-                release.wait(timeout=2)
+                release.wait(timeout=5)
             original(account, session)
 
         monkeypatch.setattr(writer, "_write", delayed)
         first = asyncio.create_task(writer.update("account-a", snapshot))
+        tasks.append(first)
         assert await asyncio.to_thread(entered.wait, 1)
-        first.cancel()
+        for _ in range(cancel_count):
+            first.cancel()
+            await asyncio.sleep(0)
         newer = snapshot.model_copy(update={"refresh_token": SecretStr("synthetic-newest-refresh")})
         second = asyncio.create_task(writer.update("account-a", newer))
+        tasks.append(second)
         await asyncio.sleep(0.02)
         assert len(calls) == 1
         release.set()
@@ -546,6 +554,51 @@ async def test_cancelled_session_write_cannot_overwrite_a_later_rotation(
         )
     finally:
         release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await backend.close()
+
+
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_cancelled_scope_persistence_failure_blocks_account_without_cached_retry(
+    config, cloud, tmp_path, monkeypatch, cancel_count
+):
+    path = tmp_path / "protocol.json"
+    private_write(path, secret_json(config))
+    writer = SessionFile(path, config)
+    backend = CloudBackend(
+        config, transport_factory=cloud.transport, on_session_update=writer.update
+    )
+    release, entered = threading.Event(), threading.Event()
+    task = None
+    try:
+        await backend.vehicles("account-a")
+        backend._apis["account-a"].auth._scopes.clear()
+
+        def fail_write(account, session):
+            entered.set()
+            release.wait(timeout=5)
+            raise OSError("synthetic-private-write-error")
+
+        monkeypatch.setattr(writer, "_write", fail_write)
+        task = asyncio.create_task(backend.vehicles("account-a"))
+        assert await asyncio.to_thread(entered.wait, 1)
+        for _ in range(cancel_count):
+            task.cancel()
+            await asyncio.sleep(0)
+        release.set()
+        (outcome,) = await asyncio.gather(task, return_exceptions=True)
+        assert isinstance(outcome, ProtocolError)
+        assert outcome.code == "private_session_persistence_failed"
+        assert "synthetic-private-write-error" not in str(outcome)
+        requests = len(cloud.requests)
+        with pytest.raises(ProtocolError, match="account_requires_operator_attention"):
+            await backend.vehicles("account-a")
+        assert len(cloud.requests) == requests
+        assert not cloud.sends
+    finally:
+        release.set()
+        if task:
+            await asyncio.gather(task, return_exceptions=True)
         await backend.close()
 
 
@@ -565,6 +618,83 @@ async def test_cancel_reconnection_preserves_existing_configuration_and_database
         assert private_read(directory / "vehicle-protocol.json") == original
         assert wizard.state.account.device_id == config.accounts[0].device_id
         assert wizard.state.session is not None
+    finally:
+        await wizard.close()
+
+
+@pytest.mark.parametrize("cancel_before_restart", [False, True])
+@pytest.mark.parametrize("missing_list", ["empty", "only_unselected"])
+async def test_reconnection_recovers_committed_vehicle_identity_and_idempotency_history(
+    config, cloud, tmp_path, monkeypatch, cancel_before_restart, missing_list
+):
+    directory = tmp_path / "setup"
+    wizard = new_wizard(config, cloud, directory)
+    try:
+        await prepare_selection(wizard, config)
+        chosen = wizard.state.candidates[0]
+        await act(wizard, "select", selected=[chosen.vehicle_id])
+        settings_path = Path(wizard.status()["config_file"])
+        settings_bytes = private_read(settings_path)
+        settings = Settings.model_validate_json(settings_bytes)
+        committed = load_cloud_config(settings.vehicle_secrets_file)
+        original_token = private_read(settings_path.parent / "backend-token")
+        backend = CloudBackend(committed, transport_factory=cloud.transport)
+        namespace = backend.storage_namespace
+        await backend.close()
+        command = ClimateCommand(
+            vehicle_id=chosen.vehicle_id, enabled=False, idempotency_key="synthetic-prior-request"
+        )
+        journal = OperationStore(settings.database)
+        try:
+            journal.bind_backend(namespace)
+            operation = journal.create("local-owner", command)
+            journal.transition(operation.operation_id, Phase.UNKNOWN, "synthetic_unknown")
+        finally:
+            journal.close()
+        database_bytes = settings.database.read_bytes()
+
+        records = cloud.records["account-a"]
+        cloud.records["account-a"] = [] if missing_list == "empty" else records[1:]
+        await start(wizard, config)
+        assert chosen.vehicle_id not in {c.vehicle_id for c in wizard.state.candidates}
+        assert private_read(settings.vehicle_secrets_file) == secret_json(committed)
+        if cancel_before_restart:
+            requests = len(cloud.requests)
+            await act(wizard, "cancel")
+            assert wizard.state.phase == "ready"
+            assert wizard.state.candidates == [chosen]
+            assert wizard.state.selected == [chosen.vehicle_id]
+            assert len(cloud.requests) == requests
+        await wizard.close()
+        wizard = new_wizard(config, cloud, directory)
+        cloud.records["account-a"] = records
+        # Advance the ordinary cooldown, without removing persisted attempt history.
+        later = time.time() + 901
+        monkeypatch.setattr("lixiang_mcp.setup.wizard.time.time", lambda: later)
+        await start(wizard, config)
+        recovered = next(c for c in wizard.state.candidates if c.vin == chosen.vin)
+        assert recovered.vehicle_id == chosen.vehicle_id
+        await act(wizard, "select", selected=[chosen.vehicle_id])
+        assert wizard.state.phase == "ready"
+        assert Path(wizard.status()["config_file"]) == settings_path
+        assert private_read(settings_path) == settings_bytes
+        assert private_read(settings_path.parent / "backend-token") == original_token
+        assert settings.database.read_bytes() == database_bytes
+        updated = load_cloud_config(settings.vehicle_secrets_file)
+        assert [(v.vin, v.vehicle_id) for v in updated.vehicles] == [
+            (chosen.vin, chosen.vehicle_id)
+        ]
+        backend = CloudBackend(updated, transport_factory=cloud.transport)
+        assert backend.storage_namespace == namespace
+        await backend.close()
+        journal = OperationStore(settings.database)
+        try:
+            journal.bind_backend(namespace)
+            assert journal.existing("local-owner", command).operation_id == operation.operation_id
+            assert journal.unresolved(chosen.vehicle_id)
+        finally:
+            journal.close()
+        assert not cloud.sends
     finally:
         await wizard.close()
 

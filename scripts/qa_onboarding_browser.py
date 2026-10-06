@@ -22,7 +22,7 @@ def serve(directory):
     from lixiang_mcp.private_files import private_write, secret_json
     from lixiang_mcp.safe_logging import configure_logging
     from lixiang_mcp.setup.storage import SetupStore
-    from lixiang_mcp.setup.web import create_setup_app
+    from lixiang_mcp.setup.web import create_setup_app, write_launch_file
     from lixiang_mcp.setup.wizard import Wizard
 
     fixtures = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tests/cloud/conftest.py"))
@@ -72,7 +72,8 @@ def serve(directory):
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]
     app = create_setup_app(wizard, token, port=port)
-    private_write(directory / "url", f"http://127.0.0.1:{port}/#{token}".encode())
+    write_launch_file(store.directory, token, port)
+    private_write(directory / "url", f"http://127.0.0.1:{port}/".encode())
     configure_logging()
     server = uvicorn.Server(
         uvicorn.Config(app, log_config=None, access_log=False, proxy_headers=False)
@@ -117,17 +118,33 @@ def check(executable):
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(executable_path=executable, headless=True)
                     page = browser.new_page()
+                    launch_uri = (directory / "wizard/launch.html").as_uri()
                     page.route(
                         "**/*",
                         lambda route: (
                             route.continue_()
                             if urlsplit(route.request.url).hostname == "127.0.0.1"
+                            or route.request.url == launch_uri
                             else route.abort()
                         ),
                     )
                     errors = []
                     page.on("pageerror", lambda error: errors.append(str(error)))
-                    page.goto(url)
+                    with page.expect_response(
+                        lambda response: response.url.split("#")[0] == url
+                    ) as entry:
+                        page.goto(launch_uri)
+                    response = entry.value
+                    navigation_headers = response.request.all_headers()
+                    print(
+                        "Local launch file navigation:",
+                        "Sec-Fetch-Site=" + navigation_headers.get("sec-fetch-site", "missing"),
+                        "Sec-Fetch-Mode=" + navigation_headers.get("sec-fetch-mode", "missing"),
+                        "Sec-Fetch-Dest=" + navigation_headers.get("sec-fetch-dest", "missing"),
+                        "HTTP",
+                        response.status,
+                    )
+                    assert response.status == 200, "local_launch_file_navigation_rejected"
                     expect(page.locator("#phase")).to_have_text("开始本机接入")
                     page.get_by_label("手机号", exact=True).fill("+" + "0" * 7)
                     page.get_by_label("密码", exact=True).fill("synthetic-password")

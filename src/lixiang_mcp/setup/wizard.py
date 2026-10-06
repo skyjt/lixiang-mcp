@@ -190,6 +190,19 @@ class Wizard:
             finally:
                 os.close(fd)
 
+    def _committed(self, export: str) -> CloudConfig:
+        config = load_cloud_config(self.store.directory / export / "vehicle-protocol.json")
+        if len(config.accounts) != 1:
+            raise ServiceError("invalid_committed_connection")
+        return config
+
+    @staticmethod
+    def _committed_candidates(config: CloudConfig) -> list[Candidate]:
+        return [
+            Candidate(vehicle_id=v.vehicle_id, vin=v.vin, model_id=v.model_id, label=v.label)
+            for v in config.vehicles
+        ]
+
     def _launch(self) -> None:
         if self.state.account is None:
             raise ServiceError("account_required")
@@ -214,9 +227,8 @@ class Wizard:
                 if self._task:
                     self._task.cancel()
                 if self.state.export:
-                    existing = load_cloud_config(
-                        self.store.directory / self.state.export / "vehicle-protocol.json"
-                    ).accounts[0]
+                    committed = self._committed(self.state.export)
+                    existing = committed.accounts[0]
                     account = LoginCredentials.model_validate(
                         existing.model_dump(
                             include={
@@ -251,6 +263,9 @@ class Wizard:
                         signing=signing,
                         session=existing.saved_session,
                         identities=identities,
+                        profile=committed.profile,
+                        candidates=self._committed_candidates(committed),
+                        selected=[v.vehicle_id for v in committed.vehicles],
                         error=None,
                     )
                     return self.status()
@@ -355,8 +370,10 @@ class Wizard:
                     or not selected <= {c.vehicle_id for c in self.state.candidates}
                 ):
                     raise ServiceError("invalid_vehicle_selection")
-                if self.state.export and selected != set(self.state.selected):
-                    raise ServiceError("existing_connection_selection_locked")
+                if self.state.export:
+                    committed = self._committed(self.state.export)
+                    if selected != {v.vehicle_id for v in committed.vehicles}:
+                        raise ServiceError("existing_connection_selection_locked")
                 self._export(action.selected)
             return self.status()
 
@@ -394,7 +411,15 @@ class Wizard:
                 )
                 api = VehicleAPI(state.profile, auth, Signer(state.profile, complete), api_http)
                 records = await api.vehicles()
-                candidates = self._candidates(records, state.candidates)
+                previous = state.candidates
+                if state.export:
+                    # The committed VIN mapping survives incomplete cloud lists and old
+                    # interrupted checkpoints. It wins over provisional candidate aliases.
+                    previous = [
+                        *previous,
+                        *self._committed_candidates(self._committed(state.export)),
+                    ]
+                candidates = self._candidates(records, previous)
                 session = await auth.snapshot()
                 async with self._lock:
                     if generation == self._generation:

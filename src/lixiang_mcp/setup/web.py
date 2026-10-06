@@ -156,6 +156,19 @@ def create_setup_app(wizard: Wizard, token: str, *, port: int = 8765) -> ASGIApp
     return LocalOnly(app, token, port)
 
 
+def write_launch_file(directory: Path, token: str, port: int) -> Path:
+    """Use the same private file entry point in the CLI and browser journey check."""
+    launch = directory / "launch.html"
+    url = f"http://127.0.0.1:{port}/#{token}"
+    html = (
+        '<!doctype html><meta name="referrer" content="no-referrer"><script>location.replace('
+        + json.dumps(url)
+        + ")</script>"
+    )
+    private_write(launch, html.encode())
+    return launch
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="仅本机浏览器使用的理想账号接入向导；不属于 MCP 工具"
@@ -170,14 +183,7 @@ def main() -> None:
     try:
         wizard = Wizard(SetupStore(args.state_dir))
         token = secrets.token_urlsafe(32)
-        launch = wizard.store.directory / "launch.html"
-        url = f"http://127.0.0.1:{args.port}/#{token}"
-        html = (
-            '<!doctype html><meta name="referrer" content="no-referrer"><script>location.replace('
-            + json.dumps(url)
-            + ")</script>"
-        )
-        private_write(launch, html.encode())
+        launch = write_launch_file(wizard.store.directory, token, args.port)
         app = create_setup_app(wizard, token, port=args.port)
     except Exception:
         raise SystemExit(
