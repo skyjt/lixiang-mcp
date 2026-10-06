@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE", "licenses/ha-lixiang-MIT.txt"]
-dependencies = ["mcp==1.26.0", "pydantic==2.12.5", "uvicorn==0.41.0", "starlette==1.7.0"]
+dependencies = ["mcp==1.26.0", "pydantic==2.12.5", "uvicorn==0.41.0", "starlette==1.7.0", "httpx==0.28.1", "bcrypt==4.3.0", "PyNaCl==1.6.2"]
 
 [project.scripts]
 lixiang-mcp = "lixiang_mcp.server:main"

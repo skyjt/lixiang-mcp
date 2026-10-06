@@ -1,8 +1,8 @@
 # lixiang-mcp
 
-独立 Python 理想汽车业务服务 + Streamable HTTP MCP，可在 NAS 容器中运行，不需要安装 Home Assistant。**首版只实现模拟后端，可部署和联调；真实车辆登录、签名、读写均未接通，也未实车验证。** 模拟返回均标记 `simulated: true`，不要据此判断真实车辆状态。
+独立 Python 理想汽车业务服务 + Streamable HTTP MCP，可在 NAS 容器中运行，不需要安装 Home Assistant。**默认模拟后端，可直接部署联调；另有基于固定上游源码实现的实验性 HTTP 协议适配器，尚未进行真实登录或实车验证。** 模拟返回标记 `simulated: true`，真实模式标记 `false`；不要把模拟测试通过当作实车协议已验证。
 
-参考 [C3H3-AI/ha-lixiang v1.3.2](https://github.com/C3H3-AI/ha-lixiang/tree/7e9726bb7f78c5de376c88b271ac08fac8e2b997)，仅抽取少量无秘密的协议结构。详见 [上游核验和许可](docs/UPSTREAM.md)。
+参考 [C3H3-AI/ha-lixiang v1.3.2](https://github.com/C3H3-AI/ha-lixiang/tree/7e9726bb7f78c5de376c88b271ac08fac8e2b997)，已研究登录/续期/签名/车辆选择/VSS/控制全链，并独立实现无默认秘密的协议层。详见 [源码证据与拆分决策](docs/SOURCE_RESEARCH.md) 及 [上游许可](docs/UPSTREAM.md)。
 
 ## 能做什么
 
@@ -13,7 +13,7 @@
 | `get_connection_status` | 车辆连接信号 | `vehicle:read` |
 | `get_vehicle_state` | 电量、续航、四轮胎压、四门/窗、空调状态，**不含位置** | `vehicle:read` |
 | `get_charging_status` | 充电、插枪、功率及剩余时间，只读 | `vehicle:read` |
-| `get_vehicle_location` | 单独授权的位置读取；模拟坐标固定为虚构 `(0,0)` | `vehicle:location` |
+| `get_vehicle_location` | 单独授权的位置读取；模拟坐标固定为虚构 `(0,0)`；真实模式单独请求位置 | `vehicle:location` |
 | `set_climate` | 有限前排空调开关/整数温度，异步提交 | `vehicle:climate` + 本地 `enable_control` |
 | `get_operation` | 查询本人操作及阶段历史 | `vehicle:climate` + 当前车辆归属 |
 
@@ -37,7 +37,7 @@ uv run python scripts/smoke_client.py
 
 默认地址 `http://127.0.0.1:8000/mcp`，健康检查 `/healthz`。脚本生成随机**模拟服务后端凭据**，写入忽略的 `runtime/demo-token`，服务端只保存 SHA-256；它不是理想账号 token。脚本不会打印凭据或覆盖已有配置。`auth.example.json` 是不可直接启动的占位模板。
 
-若环境主目录只读，可设置 `UV_CACHE_DIR=/tmp/lixiang-uv-cache`。`LIXIANG_CONFIG` 可指向自己的 JSON 配置文件。缺少配置、无效配置、`backend` 不为 `mock`、重复凭据或另一个进程持有同一数据库时均拒绝启动。
+若环境主目录只读，可设置 `UV_CACHE_DIR=/tmp/lixiang-uv-cache`。`LIXIANG_CONFIG` 可指向自己的 JSON 配置文件。缺少配置、无效配置、真实模式缺少私密协议配置、重复凭据或另一个进程持有同一数据库时均拒绝启动。
 
 ## Docker / NAS
 
@@ -75,6 +75,12 @@ uv run python scripts/smoke_client.py
 阶段为 `submitted → running → cloud_completed → vehicle_confirmed`，也可能 `failed` 或 `unknown`。`cloud_completed` 仅代表云端结果成功，必须读取下发之后的非陈旧车辆信号匹配才确认。提交/查询/确认超时都不重发命令；`unknown` 会拦截该车后续新操作及已排队操作。重启把未结束操作记为 `unknown`，不自动恢复执行。详见 [架构与可靠性](docs/ARCHITECTURE.md)。
 
 管理员可通过 `mock_fault` 选择 `none`、`timeout`、`reject`、`unconfirmed`、`stale` 进行演练；MCP 工具不能修改这些配置。业务拒绝以 `{"error":{"code":"..."}}` 返回；协议参数错误由 MCP 返回 `isError: true`。
+
+## 实验性协议适配器
+
+`cloud/` 已实现 PKCE/PAKE、cookie 登录会话、主 token refresh、scope 缓存、外部密钥 HMAC、SAOS 列表、受限 VSS 和空调双 token 请求。完整流程用模拟 HTTP 契约及合成加密向量验证，也通过 MCP 路由测试。尚未使用真实材料联网，默认配置不会创建真实连接。
+
+真实模式必须另行提供私密 `vehicle_secrets_file`，没有上游硬编码秘密或自动凭据发现。短信/验证码不支持，未知车型不能控制；真实控制还要求单独的 `allow_real_control`、精确车型能力和用户 grant。参数和剩余未知见 [协议适配与安全配置](docs/PROTOCOL_ADAPTER.md)。
 
 ## 检查
 

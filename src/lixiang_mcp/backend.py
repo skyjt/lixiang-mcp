@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from .models import Capabilities, ClimateCommand, Location, ServiceError, Vehicle, VehicleState, now
 from .protocol import climate_payload, sample
@@ -12,19 +12,26 @@ Fault = Literal["none", "timeout", "reject", "unconfirmed", "stale"]
 
 class Backend(Protocol):
     simulated: bool
+    storage_namespace: str
+
+    async def close(self) -> None: ...
 
     async def vehicles(self, account_id: str) -> list[Vehicle]: ...
     async def capabilities(self, vehicle_id: str) -> Capabilities: ...
     async def state(self, vehicle_id: str) -> VehicleState: ...
     async def location(self, vehicle_id: str) -> Location: ...
     async def submit_climate(self, command: ClimateCommand) -> str: ...
-    async def result(self, receipt: str) -> dict[str, int]: ...
+    async def result(self, receipt: str) -> dict[str, Any]: ...
 
 
 class MockBackend:
     """Only invented data. Fault injection is local configuration, never an MCP argument."""
 
     simulated = True
+    storage_namespace = "mock"
+
+    async def close(self) -> None:
+        pass
 
     def __init__(self, *, fault: Fault = "none", ttl: float = 120) -> None:
         self.fault, self.ttl = fault, ttl

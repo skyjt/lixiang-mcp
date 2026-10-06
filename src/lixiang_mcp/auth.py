@@ -44,7 +44,9 @@ class BackendAuth:
             await JSONResponse({"error": "untrusted_host_or_origin"}, 403)(scope, receive, send)
             return
         if scope["path"] == "/healthz" and scope["method"] == "GET":
-            await JSONResponse({"status": "ok", "backend": "mock"})(scope, receive, send)
+            await JSONResponse({"status": "ok", "backend": self.settings.backend})(
+                scope, receive, send
+            )
             return
         authorization = headers.getlist("authorization")
         credential = authorization[0] if len(authorization) == 1 else ""

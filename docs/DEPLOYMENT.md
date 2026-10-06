@@ -1,6 +1,6 @@
 # NAS 与 MCPHub 接入
 
-本说明是待操作者执行的步骤；开发交付只在云开发环境中模拟测试，没有连接 NAS、MCPHub 或理想账号。首版无需访问任何理想域名。MCPHub 产品版本/实际配置结构未提供，下面是协议契约，不声称已经打通该网关。
+本说明是待操作者执行的步骤；开发交付只在云开发环境中模拟测试，没有连接 NAS、MCPHub 或理想账号。默认模拟模式无需访问任何理想域名。实验性协议模式仅在未来安全配置后使用固定理想域名，详见 [PROTOCOL_ADAPTER.md](PROTOCOL_ADAPTER.md)。MCPHub 产品版本/实际配置结构未提供，下面是协议契约，不声称已经打通该网关。
 
 ## NAS 部署
 
@@ -9,7 +9,7 @@
 3. `runtime/auth.json` 只有凭据摘要和授权映射。Compose file secret 绑定文件需要容器 uid 10001 可读，示例使用该文件 0644 配合父目录 0700。无秘密的 `config.docker.local.json` 也需要容器可读（0644）。可改用宿主文件 ACL 或真正的 secret 管理器实现最小读取权限；不要放宽原始 token 文件权限。
 4. 容器根文件系统只读、非 root，持久卷 `/data` 由镜像 uid 10001 拥有。绑定自建宿主 data 目录时自行设为 uid/gid 10001。单进程单副本，不增加 uvicorn workers，不复制活动数据目录部署另一实例。
 5. 只绑定 `127.0.0.1:8000`；通过 NAS 同机反代或受控隧道访问。公网上必须使用 TLS；优先私有网络/mTLS，并在防火墙限制到网关出口。不要直接把 8000 暴露公网。
-6. `docker compose ps` 和 `/healthz` 只表示进程可用、mock 后端运行，不表示理想账号连通或车辆在线。用官方客户端 smoke 验证 MCP。
+6. `docker compose ps` 和 `/healthz` 只表示进程可用、所选后端已构造，不验证理想账号连通或车辆在线。用官方客户端 smoke 验证 MCP。
 
 `config.docker.local.json` 中 `allowed_hosts` 要列出到达 Python 服务时的实际 Host（不带端口）；默认 localhost/127.0.0.1。反代可把后端 Host 固定到 localhost，或将专用服务域名加入白名单。Origin 缺省可接受；出现 Origin 时必须精确匹配 `allowed_origins` 的完整 scheme/host/port。不要使用通配符。JSON/SSE Accept、Authorization 和 MCP 相关协议头需要被正确转发，`/mcp` 不应被改写成其他路径。
 
@@ -20,7 +20,7 @@
 - 对客户端提供 MCPHub 自己的 OAuth 授权流程，授权对象/资源是网关的 MCP 接入。
 - 注册 Streamable HTTP 后端 URL：`https://<专用私有或受控域名>/mcp`。
 - 在安全存储中为每个用户配置 NAS 生成的专用后端凭据，发送 `Authorization: Bearer <该用户的后端凭据>`。
-- 客户端 OAuth access token 在网关终止；NAS 后端凭据只发 NAS；理想登录材料将来只在 NAS 使用。这三者不能互换。
+- 客户端 OAuth access token 在网关终止；NAS 后端凭据只发 NAS；实验性协议模式的理想登录材料只在 NAS 使用。这三者不能互换。
 - 开始只赋 `vehicle:read`；位置是独立 consent 和 NAS grant；空调还需 NAS `enable_control`。MCPHub 的确认 UI 可以额外限制调用，但不能取代 NAS 权限检查。
 - 用户 A/B 必须分别配置不同凭据与 Principal。若网关只有一个全局 backend credential，只能作为单用户服务；不要开放给其他用户后再靠模型声明身份。
 - NAS 当前不提供 OAuth discovery、authorization endpoint 或 token exchange。若网关只支持后端 OAuth 且不能发送独立 bearer，则需要实现并审阅适配层后才能接入，不能开启匿名模式绕过。

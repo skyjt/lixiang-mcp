@@ -26,16 +26,17 @@ def climate_payload(command: ClimateCommand) -> dict[str, str | int]:
     return data
 
 
-def cloud_result(data: dict[str, Any]) -> Literal["pending", "completed", "failed"]:
-    """li_api.py pushState semantics; cloud success is not vehicle confirmation."""
-    if data.get("pushState") == 7:
-        return "failed"
-    if data.get("pushState") == 5:
-        code = data.get("resultCode")
-        # Do not accept bool (Python bool subclasses int), unknown, or missing result codes.
-        if type(code) in (int, str) and code in (0, "0", -15, "-15", -8, "-8"):
-            return "completed"
-        return "failed"
+def cloud_result(data: dict[str, Any]) -> Literal["pending", "completed", "failed", "unknown"]:
+    """Contradictory/missing terminal codes cannot prove success or safe rejection."""
+    state, code = data.get("pushState"), data.get("resultCode")
+    valid_code = type(code) in (int, str)
+    success = valid_code and code in (0, "0", -15, "-15", -8, "-8")
+    if type(state) is not int:
+        return "unknown"
+    if state == 5:
+        return "completed" if success else "unknown"
+    if state == 7:
+        return "failed" if valid_code and not success else "unknown"
     return "pending"
 
 

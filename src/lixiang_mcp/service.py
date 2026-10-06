@@ -33,8 +33,7 @@ class VehicleService:
         command_timeout: float = 5,
         max_pending: int = 32,
     ) -> None:
-        if not backend.simulated:
-            raise RuntimeError("real_backend_not_implemented")
+        store.bind_backend(backend.storage_namespace)
         self.backend, self.store = backend, store
         self.enable_control, self.command_timeout = enable_control, command_timeout
         self.max_pending = max_pending
@@ -104,6 +103,8 @@ class VehicleService:
     async def submit(self, principal: Principal, command: ClimateCommand) -> Operation:
         # Validate even for direct business-layer callers, before idempotency lookup.
         command = ClimateCommand.model_validate(command.model_dump())
+        if not self.enable_control:
+            raise ServiceError("control_disabled")
         await self.authorize(principal, command.vehicle_id, "vehicle:climate")
         await self.validate_control(command)
         existing = self.store.existing(principal.subject, command)
@@ -115,7 +116,7 @@ class VehicleService:
             raise ServiceError("queue_full")
         if self.store.unresolved(command.vehicle_id):
             raise ServiceError("vehicle_has_unknown_operation")
-        op = self.store.create(principal.subject, command)
+        op = self.store.create(principal.subject, command, simulated=self.backend.simulated)
         task = asyncio.create_task(self._execute(principal, command, op.operation_id))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -136,8 +137,11 @@ class VehicleService:
                 async with asyncio.timeout(self.command_timeout):
                     # There is exactly one send; timeouts and renewal failures never replay it.
                     receipt = await self.backend.submit_climate(command)
+                    started = now()  # Require a new sample after the submission response.
                     while True:
                         result = cloud_result(await self.backend.result(receipt))
+                        if result == "unknown":
+                            raise RuntimeError("conflicting_cloud_result")
                         if result == "failed":
                             raise ServiceError("cloud_rejected")
                         if result == "completed":
@@ -192,4 +196,7 @@ class VehicleService:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        self.store.close()
+        try:
+            await self.backend.close()
+        finally:
+            self.store.close()

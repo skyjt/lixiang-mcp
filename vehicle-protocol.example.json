@@ -1,0 +1,41 @@
+{
+  "profile": {
+    "client_id": "CONFIGURE_EXTERNALLY",
+    "redirect_uri": "CONFIGURE_EXTERNALLY",
+    "login_audience": "CONFIGURE_EXTERNALLY",
+    "login_scope": "CONFIGURE_EXTERNALLY",
+    "vehicles_audience": "CONFIGURE_EXTERNALLY",
+    "vss_audience": "CONFIGURE_EXTERNALLY",
+    "mesh_audience": "CONFIGURE_EXTERNALLY",
+    "vat_audience": "CONFIGURE_EXTERNALLY",
+    "login_app_version": "CONFIGURE_EXTERNALLY",
+    "sdk_version": "CONFIGURE_EXTERNALLY",
+    "sign_app_version": "CONFIGURE_EXTERNALLY",
+    "login_user_agent": "CONFIGURE_EXTERNALLY",
+    "api_user_agent": "CONFIGURE_EXTERNALLY"
+  },
+  "accounts": [
+    {
+      "account_id": "owner-account",
+      "phone": "CONFIGURE_USING_SECURE_CHANNEL",
+      "password": "CONFIGURE_USING_SECURE_CHANNEL",
+      "device_id": "CONFIGURE_USING_SECURE_CHANNEL",
+      "key_id": "CONFIGURE_USING_SECURE_CHANNEL",
+      "hac_key_hex": "CONFIGURE_32_BYTES_AS_64_HEX_EXTERNALLY",
+      "app_token": "CONFIGURE_USING_SECURE_CHANNEL"
+    }
+  ],
+  "vehicles": [
+    {
+      "vehicle_id": "owner-car",
+      "account_id": "owner-account",
+      "vin": "CONFIGURE_USING_SECURE_CHANNEL",
+      "label": "我的车辆（本地别名）",
+      "model_label": "待核验车型",
+      "model_id": "EXACT_REVIEWED_CLOUD_MODEL_ID",
+      "climate_supported": false,
+      "location_supported": false
+    }
+  ],
+  "allow_real_control": false
+}

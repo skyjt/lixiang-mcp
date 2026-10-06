@@ -1,0 +1,10 @@
+# Optional future operator configuration. Not used by CI or default Compose.
+# Only after secure, explicit provisioning; examples contain no usable credentials.
+services:
+  lixiang-mcp:
+    secrets:
+      - vehicle_protocol
+
+secrets:
+  vehicle_protocol:
+    file: ./secrets/vehicle-protocol.json

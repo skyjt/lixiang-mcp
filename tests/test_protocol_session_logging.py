@@ -23,11 +23,11 @@ from lixiang_mcp.session import (
         ({"pushState": 5, "resultCode": 0}, "completed"),
         ({"pushState": 5, "resultCode": "-15"}, "completed"),
         ({"pushState": 5, "resultCode": "-8"}, "completed"),
-        ({"pushState": 5, "resultCode": True}, "failed"),
-        ({"pushState": 5}, "failed"),
-        ({"pushState": 7}, "failed"),
+        ({"pushState": 5, "resultCode": True}, "unknown"),
+        ({"pushState": 5}, "unknown"),
+        ({"pushState": 7}, "unknown"),
         ({"pushState": 3}, "pending"),
-        ({}, "pending"),
+        ({}, "unknown"),
     ],
 )
 def test_cloud_result(data, expected):

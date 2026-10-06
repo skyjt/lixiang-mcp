@@ -13,7 +13,10 @@ from starlette.routing import Mount
 from starlette.types import ASGIApp
 
 from .auth import BackendAuth, principal
-from .backend import MockBackend
+from .backend import Backend, MockBackend
+from .cloud.backend import CloudBackend
+from .cloud.config import load_cloud_config
+from .cloud.transport import ProtocolError
 from .config import AuthConfig, Settings
 from .models import ClimateCommand, ServiceError, VehicleId
 from .safe_logging import configure_logging
@@ -27,21 +30,34 @@ async def public_call(call: Callable[[], Awaitable[Any]]) -> dict[str, Any]:
         if isinstance(value, list):
             return {"vehicles": [v.model_dump(mode="json") for v in value]}
         return dict(value.model_dump(mode="json"))
-    except ServiceError as exc:
+    except (ServiceError, ProtocolError) as exc:
         return {"error": {"code": exc.code}}
     except Exception:
         return {"error": {"code": "backend_unavailable"}}
 
 
-def create_app(settings: Settings) -> ASGIApp:
+def create_app(settings: Settings, *, backend: Backend | None = None) -> ASGIApp:
     auth = AuthConfig.model_validate_json(settings.auth_file.read_text())
+    if backend is None:
+        if settings.backend == "lixiang":
+            if settings.vehicle_secrets_file is None:
+                raise ValueError("vehicle_secrets_file_required")
+            backend = CloudBackend(
+                load_cloud_config(settings.vehicle_secrets_file), ttl=settings.stale_after_seconds
+            )
+        else:
+            backend = MockBackend(fault=settings.mock_fault, ttl=settings.stale_after_seconds)
     store = OperationStore(settings.database)
-    service = VehicleService(
-        MockBackend(fault=settings.mock_fault, ttl=settings.stale_after_seconds),
-        store,
-        enable_control=settings.enable_control,
-        command_timeout=settings.command_timeout,
-    )
+    try:
+        service = VehicleService(
+            backend,
+            store,
+            enable_control=settings.enable_control,
+            command_timeout=settings.command_timeout,
+        )
+    except Exception:
+        store.close()
+        raise
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -53,7 +69,7 @@ def create_app(settings: Settings) -> ASGIApp:
 
     mcp = FastMCP(
         "lixiang-mcp",
-        instructions="仅模拟数据。未知结果不得重发控车命令。位置需独立权限。",
+        instructions="检查 simulated 标记。未知结果不得重发控车命令。位置需独立权限。",
         stateless_http=True,
         json_response=True,
         # Host and Origin checks live in the outer middleware with explicit operator configuration.
@@ -63,7 +79,7 @@ def create_app(settings: Settings) -> ASGIApp:
 
     @mcp.tool(annotations=read)
     async def list_vehicles() -> dict[str, Any]:
-        """列出当前后端凭据获准访问且属于绑定车辆账号的模拟车辆。"""
+        """列出当前后端凭据获准访问且属于绑定车辆账号的车辆。"""
         return await public_call(lambda: service.vehicles(principal()))
 
     @mcp.tool(annotations=read)
@@ -96,7 +112,7 @@ def create_app(settings: Settings) -> ASGIApp:
 
     @mcp.tool(annotations=read)
     async def get_vehicle_location(vehicle_id: VehicleId) -> dict[str, Any]:
-        """独立 vehicle:location 权限读取位置；模拟返回虚构 (0,0)。"""
+        """独立 vehicle:location 权限读取位置；模拟模式返回虚构 (0,0)。"""
         return await public_call(lambda: service.location(principal(), vehicle_id))
 
     @mcp.tool(

@@ -40,6 +40,20 @@ class OperationStore:
             if op.phase in ACTIVE:
                 self.transition(op.operation_id, Phase.UNKNOWN, "interrupted_no_replay")
 
+    def bind_backend(self, namespace: str) -> None:
+        self.db.execute("CREATE TABLE IF NOT EXISTS backend (namespace TEXT NOT NULL)")
+        row = self.db.execute("SELECT namespace FROM backend").fetchone()
+        if row is not None and row[0] != namespace:
+            raise RuntimeError("operation_store_backend_mismatch")
+        if row is None:
+            if (
+                namespace != "mock"
+                and self.db.execute("SELECT 1 FROM operations LIMIT 1").fetchone()
+            ):
+                raise RuntimeError("unbound_store_contains_operations")
+            with self.db:
+                self.db.execute("INSERT INTO backend VALUES (?)", (namespace,))
+
     def existing(self, subject: str, command: ClimateCommand) -> Operation | None:
         row = self.db.execute(
             "SELECT fingerprint, body FROM operations WHERE subject=? AND key_hash=?",
@@ -64,10 +78,11 @@ class OperationStore:
         rows = self.db.execute("SELECT body FROM operations WHERE vehicle=?", (vehicle_id,))
         return any(Operation.model_validate_json(raw).phase == Phase.UNKNOWN for (raw,) in rows)
 
-    def create(self, subject: str, command: ClimateCommand) -> Operation:
+    def create(self, subject: str, command: ClimateCommand, *, simulated: bool = True) -> Operation:
         timestamp = now()
         op = Operation(
             operation_id=str(uuid.uuid4()),
+            simulated=simulated,
             vehicle_id=command.vehicle_id,
             phase=Phase.SUBMITTED,
             created_at=timestamp,
