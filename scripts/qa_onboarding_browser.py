@@ -74,9 +74,25 @@ def serve(directory):
     app = create_setup_app(wizard, token, port=port)
     write_launch_file(store.directory, token, port)
     private_write(directory / "url", f"http://127.0.0.1:{port}/".encode())
+
+    async def observe_entry(scope, receive, send):
+        if scope["type"] == "http" and scope["path"] == "/":
+            headers = dict(scope["headers"])
+            # Record only browser navigation metadata, never credentials or request bodies.
+            private_write(
+                directory / "entry.json",
+                json.dumps(
+                    {
+                        key: headers.get(key.encode(), b"missing").decode()
+                        for key in ("sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "origin")
+                    }
+                ).encode(),
+            )
+        await app(scope, receive, send)
+
     configure_logging()
     server = uvicorn.Server(
-        uvicorn.Config(app, log_config=None, access_log=False, proxy_headers=False)
+        uvicorn.Config(observe_entry, log_config=None, access_log=False, proxy_headers=False)
     )
     try:
         server.run(sockets=[listener])
@@ -135,12 +151,13 @@ def check(executable):
                     ) as entry:
                         page.goto(launch_uri)
                     response = entry.value
-                    navigation_headers = response.request.all_headers()
+                    navigation_headers = json.loads((directory / "entry.json").read_text())
                     print(
                         "Local launch file navigation:",
                         "Sec-Fetch-Site=" + navigation_headers.get("sec-fetch-site", "missing"),
                         "Sec-Fetch-Mode=" + navigation_headers.get("sec-fetch-mode", "missing"),
                         "Sec-Fetch-Dest=" + navigation_headers.get("sec-fetch-dest", "missing"),
+                        "Origin=" + navigation_headers.get("origin", "missing"),
                         "HTTP",
                         response.status,
                     )
