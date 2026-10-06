@@ -1,0 +1,31 @@
+services:
+  lixiang-mcp:
+    build: .
+    image: lixiang-mcp:local
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      LIXIANG_CONFIG: /run/config/config.json
+    volumes:
+      - operations:/data
+      - ./config.docker.local.json:/run/config/config.json:ro
+    secrets:
+      - backend_auth
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+secrets:
+  backend_auth:
+    file: ./runtime/auth.json
+
+volumes:
+  operations:

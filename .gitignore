@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local-only authorization/configuration, credentials, journals and reports
+runtime/
+config.local.json
+config.docker.local.json
+*.sqlite*
+*.lock.tmp
+secrets/
+.gitleaks-report.json

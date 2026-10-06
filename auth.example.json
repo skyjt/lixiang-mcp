@@ -1,0 +1,13 @@
+{
+  "credentials": [
+    {
+      "token_sha256": "REPLACE_WITH_SHA256_OF_RANDOM_BACKEND_CREDENTIAL",
+      "principal": {
+        "subject": "demo-user",
+        "account_id": "demo-account",
+        "vehicle_ids": ["demo-l6", "demo-l7", "demo-unknown"],
+        "scopes": ["vehicle:read"]
+      }
+    }
+  ]
+}

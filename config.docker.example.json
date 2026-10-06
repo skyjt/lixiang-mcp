@@ -1,0 +1,13 @@
+{
+  "backend": "mock",
+  "auth_file": "/run/secrets/backend_auth",
+  "database": "/data/operations.sqlite",
+  "enable_control": false,
+  "mock_fault": "none",
+  "command_timeout": 5,
+  "stale_after_seconds": 120,
+  "allowed_hosts": ["127.0.0.1", "localhost"],
+  "allowed_origins": [],
+  "host": "0.0.0.0",
+  "port": 8000
+}
