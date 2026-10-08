@@ -1,0 +1,10 @@
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!licenses/
+!licenses/**
+!src/
+!src/**
+**/__pycache__/

@@ -1,0 +1,13 @@
+{
+  "backend": "lixiang",
+  "vehicle_secrets_file": "/run/secrets/vehicle_protocol",
+  "auth_file": "/run/secrets/backend_auth",
+  "database": "/data/lixiang-operations.sqlite",
+  "enable_control": false,
+  "command_timeout": 60,
+  "stale_after_seconds": 120,
+  "allowed_hosts": ["127.0.0.1", "localhost"],
+  "allowed_origins": [],
+  "host": "0.0.0.0",
+  "port": 8000
+}

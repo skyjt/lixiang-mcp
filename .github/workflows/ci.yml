@@ -1,0 +1,31 @@
+name: checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.30.0 dir /repo --redact --no-banner
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install uv==0.12.19
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -q
+      - run: uv sync --frozen --group browser
+      - run: uv run --group browser python scripts/qa_onboarding_browser.py --browser-executable "$(command -v google-chrome)"
+      - run: python scripts/check_public_tree.py
+      - run: python scripts/create_demo_config.py
+      - run: cp config.docker.example.json config.docker.local.json
+      # Compose local file secrets are bind mounts; the container runs as uid 10001.
+      - run: chmod 644 runtime/auth.json config.docker.local.json
+      - run: docker compose config --quiet && docker compose up -d --build --wait
+      - run: uv run python scripts/smoke_client.py
+      - run: uv run python scripts/readonly_client.py --config config.docker.local.json --token-file runtime/demo-token
+      - if: always()
+        run: docker compose down -v
